@@ -1,0 +1,853 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Country Club: Party Games</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #0f172a;
+            font-family: 'Inter', system-ui, sans-serif;
+            color: white;
+        }
+
+        canvas {
+            display: block;
+            image-rendering: pixelated;
+            touch-action: none;
+        }
+
+        .ui-panel {
+            pointer-events: auto;
+        }
+
+        .glass {
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .btn-card {
+            transition: all 0.2s;
+            border: 2px solid transparent;
+        }
+
+        .btn-card:hover {
+            transform: translateY(-4px);
+            background: rgba(255, 255, 255, 0.05);
+            border-color: rgba(16, 185, 129, 0.5);
+        }
+
+        #loading-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 100;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #0f172a;
+        }
+
+        @keyframes pulse-gold {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.5;
+            }
+        }
+
+        .winner-glow {
+            animation: pulse-gold 2s infinite;
+            color: #fbbf24;
+            text-shadow: 0 0 20px rgba(251, 191, 36, 0.5);
+        }
+
+        /* Custom Toast */
+        #toast-container {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .toast {
+            background: rgba(0, 0, 0, 0.9);
+            color: white;
+            padding: 12px 24px;
+            border-radius: 99px;
+            font-size: 14px;
+            font-weight: bold;
+            animation: slideUp 0.3s ease-out;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        @keyframes slideUp {
+            from {
+                transform: translateY(100%);
+                opacity: 0;
+            }
+
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="loading-overlay">
+        <div class="text-center">
+            <div class="text-6xl animate-bounce mb-4">🚜</div>
+            <h1 class="text-2xl font-black tracking-tighter uppercase">The Country Club</h1>
+            <p class="text-emerald-500 text-xs mt-2 animate-pulse">Syncing with Peer Network...</p>
+        </div>
+    </div>
+
+    <div id="toast-container"></div>
+
+    <!-- LOBBY UI -->
+    <div id="lobby-screen" class="fixed inset-0 z-[60] flex items-center justify-center p-6 hidden">
+        <div class="max-w-4xl w-full grid grid-cols-1 lg:grid-cols-3 gap-8">
+
+            <!-- Left: Player Info -->
+            <div class="lg:col-span-1 space-y-6">
+                <div class="glass p-6 rounded-3xl">
+                    <h2 class="text-4xl font-black mb-1 italic">THE CLUB</h2>
+                    <p class="text-emerald-400 text-xs font-bold uppercase tracking-widest mb-6">Lobby Area</p>
+
+                    <div class="space-y-4">
+                        <div>
+                            <label class="text-[10px] uppercase opacity-50 font-bold ml-1">Your Name</label>
+                            <input type="text" id="name-input" placeholder="Farmer Joe" maxlength="12"
+                                class="w-full bg-white/5 border border-white/10 p-3 rounded-xl outline-none focus:border-emerald-500 transition-all font-bold">
+                        </div>
+                        <div>
+                            <label class="text-[10px] uppercase opacity-50 font-bold ml-1">Room Code</label>
+                            <input type="text" id="room-input" placeholder="AUTO"
+                                class="w-full bg-white/5 border border-white/10 p-3 rounded-xl outline-none focus:border-emerald-500 transition-all font-mono uppercase font-bold">
+                        </div>
+                        <button onclick="saveProfile()"
+                            class="w-full bg-emerald-600 hover:bg-emerald-500 py-4 rounded-xl font-black text-lg transition-all shadow-lg shadow-emerald-900/20">
+                            ENTER HUB
+                        </button>
+                    </div>
+                </div>
+
+                <div class="glass p-6 rounded-3xl flex flex-col max-h-[40vh]">
+                    <h3 class="text-xs font-bold uppercase opacity-50 mb-4 tracking-tighter">Peers in Room</h3>
+                    <div id="peer-list" class="space-y-2 overflow-y-auto flex-1 pr-2 custom-scroll">
+                        <!-- Peer list -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right: Game Selection -->
+            <div class="lg:col-span-2 space-y-4">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <button onclick="hostGame('farming')"
+                        class="btn-card glass p-6 rounded-3xl text-left relative overflow-hidden group">
+                        <span class="text-4xl mb-2 block">🧑‍🌾</span>
+                        <h3 class="font-black text-xl">Star-Crossed Fields</h3>
+                        <p class="text-xs opacity-60 mt-2">The Long Game. Build your farm together. No timers, just
+                            vibes.</p>
+                    </button>
+                    <button onclick="hostGame('reapers')"
+                        class="btn-card glass p-6 rounded-3xl text-left relative overflow-hidden group">
+                        <span class="text-4xl mb-2 block">✂️</span>
+                        <h3 class="font-black text-xl text-red-400">Rapid Reapers</h3>
+                        <p class="text-xs opacity-60 mt-2">60s Party Loop. Run through the field to clear the most
+                            weeds!</p>
+                    </button>
+                    <button onclick="hostGame('pond')"
+                        class="btn-card glass p-6 rounded-3xl text-left relative overflow-hidden group">
+                        <span class="text-4xl mb-2 block">🛶</span>
+                        <h3 class="font-black text-xl text-blue-400">Pond Rider</h3>
+                        <p class="text-xs opacity-60 mt-2">Race down the murky river. Stay in the water to avoid slowing
+                            down.</p>
+                    </button>
+                    <button onclick="hostGame('mushrooms')"
+                        class="btn-card glass p-6 rounded-3xl text-left relative overflow-hidden group">
+                        <span class="text-4xl mb-2 block">🍄</span>
+                        <h3 class="font-black text-xl text-purple-400">Mushroom Hunt</h3>
+                        <p class="text-xs opacity-60 mt-2">Navigate the dense forest maze. First to touch the Red
+                            Mushroom wins.</p>
+                    </button>
+                    <button onclick="hostGame('swimmer')"
+                        class="btn-card glass p-6 rounded-3xl text-left relative overflow-hidden group md:col-span-2">
+                        <div class="flex items-center gap-4">
+                            <span class="text-5xl">🐊</span>
+                            <div>
+                                <h3 class="font-black text-xl text-teal-400">Speed Swimmer</h3>
+                                <p class="text-xs opacity-60 mt-1">Cross the channel to the bottom island. Touching a
+                                    croc sends you back to the start!</p>
+                            </div>
+                        </div>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- IN-GAME HUD -->
+    <div id="game-hud" class="fixed top-6 inset-x-6 z-50 pointer-events-none hidden">
+        <div class="flex justify-between items-start">
+            <div class="glass p-4 rounded-2xl pointer-events-auto flex items-center gap-6 shadow-2xl">
+                <div>
+                    <p class="text-[10px] uppercase font-bold text-emerald-400 leading-none mb-1" id="hud-label-1">
+                        Wallet</p>
+                    <p class="text-2xl font-black" id="hud-value-1">💰 0</p>
+                </div>
+                <div class="w-px h-8 bg-white/10" id="hud-divider"></div>
+                <div id="hud-stat-2">
+                    <p class="text-[10px] uppercase font-bold text-emerald-400 leading-none mb-1" id="hud-label-2">
+                        Backpack</p>
+                    <p class="text-2xl font-black" id="hud-value-2">🌾 0</p>
+                </div>
+            </div>
+
+            <div class="glass px-8 py-3 rounded-2xl text-center shadow-2xl pointer-events-auto border-t-4 border-t-emerald-500"
+                id="timer-container">
+                <p class="text-[10px] uppercase font-bold opacity-60 mb-1 tracking-widest" id="game-title-display">
+                    Farming</p>
+                <p class="text-3xl font-mono font-black tabular-nums" id="timer-display">--:--</p>
+            </div>
+
+            <div class="flex flex-col gap-2 pointer-events-auto">
+                <button onclick="backToLobby()"
+                    class="glass px-4 py-2 rounded-xl text-xs font-bold hover:bg-red-500/80 hover:text-white transition-all shadow-lg border-red-500/30">EXIT
+                    TO HUB</button>
+                <button onclick="copyRoomCode()"
+                    class="glass px-4 py-2 rounded-xl text-xs font-bold hover:bg-white/20 transition-all shadow-lg">SHARE
+                    CODE</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- VICTORY SCREEN -->
+    <div id="victory-screen"
+        class="fixed inset-0 z-[70] bg-black/80 flex items-center justify-center hidden backdrop-blur-md">
+        <div class="glass p-12 rounded-3xl text-center max-w-md w-full shadow-2xl border-emerald-500/30 transform scale-95 transition-transform duration-300"
+            id="victory-card">
+            <h2 class="text-7xl mb-6">🏆</h2>
+            <h3 class="text-4xl font-black mb-2 winner-glow">WINNER!</h3>
+            <p class="text-white text-2xl font-bold mb-8 uppercase tracking-widest" id="victory-player">Player Name</p>
+            <button onclick="backToLobby()"
+                class="w-full bg-emerald-600 hover:bg-emerald-500 py-4 rounded-xl font-black text-lg transition-all shadow-lg">RETURN
+                TO HUB</button>
+        </div>
+    </div>
+
+    <!-- TOOLBAR (Only for Farming) -->
+    <div id="toolbar"
+        class="fixed bottom-8 left-1/2 -translate-x-1/2 glass p-2 rounded-2xl flex gap-2 z-50 pointer-events-auto hidden shadow-2xl">
+        <button onclick="setTool('hoe')" id="tool-hoe"
+            class="w-16 h-16 rounded-xl flex items-center justify-center text-3xl bg-emerald-600 border-2 border-white transition-all">⛏️</button>
+        <button onclick="setTool('seeds')" id="tool-seeds"
+            class="w-16 h-16 rounded-xl flex items-center justify-center text-3xl bg-white/5 border-2 border-transparent transition-all hover:bg-white/10">🌱</button>
+        <button onclick="setTool('water')" id="tool-water"
+            class="w-16 h-16 rounded-xl flex items-center justify-center text-3xl bg-white/5 border-2 border-transparent transition-all hover:bg-white/10">💧</button>
+        <button onclick="setTool('scythe')" id="tool-scythe"
+            class="w-16 h-16 rounded-xl flex items-center justify-center text-3xl bg-white/5 border-2 border-transparent transition-all hover:bg-white/10">✂️</button>
+    </div>
+
+    <canvas id="stage"></canvas>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, onSnapshot, collection } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // --- Configuration ---
+        const firebaseConfig = JSON.parse(__firebase_config);
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'country-club-party';
+
+        const TILE_SIZE = 64;
+        const GRID_SIZE = 50;
+        const BIN_POS = { x: 5, y: 5 };
+
+        // --- Game State ---
+        let roomCode = "";
+        let roomPath = "";
+        let player = { id: null, name: "Farmer", x: 10, y: 10, money: 10, inv: 0, score: 0, tool: 'hoe', active: false, initialized: false };
+        let players = {};
+        let world = {};
+        let metadata = { currentGame: 'lobby', status: 'waiting', timer: 0, winner: null };
+        let lastRenderTime = 0;
+
+        const canvas = document.getElementById('stage');
+        const ctx = canvas.getContext('2d');
+
+        // --- UI Helpers ---
+        window.showToast = (msg) => {
+            const c = document.getElementById('toast-container');
+            const t = document.createElement('div');
+            t.className = 'toast'; t.innerText = msg;
+            c.appendChild(t);
+            setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 300); }, 3000);
+        };
+
+        // --- Authentication & Initialization ---
+        async function init() {
+            try {
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        player.id = user.uid;
+                        document.getElementById('loading-overlay').style.display = 'none';
+                        document.getElementById('lobby-screen').classList.remove('hidden');
+
+                        const urlParams = new URLSearchParams(window.location.search);
+                        const r = urlParams.get('room');
+                        if (r) document.getElementById('room-input').value = r.toUpperCase();
+                    }
+                });
+            } catch (e) { console.error(e); }
+        }
+
+        window.saveProfile = () => {
+            const nameInput = document.getElementById('name-input').value.trim();
+            const codeInput = document.getElementById('room-input').value.trim().toUpperCase();
+
+            player.name = nameInput || "Player" + Math.floor(Math.random() * 1000);
+            roomCode = codeInput || Math.random().toString(36).substring(2, 6).toUpperCase();
+
+            try {
+                const newUrl = window.location.protocol + "//" + window.location.host + window.location.pathname + '?room=' + roomCode;
+                window.history.replaceState({ path: newUrl }, '', newUrl);
+            } catch (e) { }
+
+            startSync();
+        };
+
+        function startSync() {
+            if (!auth.currentUser) return;
+
+            // Metadata Sync
+            const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'room_metadata', roomCode);
+            onSnapshot(metaRef, (snap) => {
+                if (snap.exists()) {
+                    metadata = snap.data();
+                    handleGameStateChange();
+                } else {
+                    setDoc(metaRef, { currentGame: 'lobby', status: 'waiting', startTime: Date.now(), winner: null });
+                }
+            });
+
+            // Player Sync
+            const playersRef = collection(db, 'artifacts', appId, 'public', 'data', 'players_' + roomCode);
+            onSnapshot(playersRef, (snapshot) => {
+                snapshot.docChanges().forEach(change => {
+                    const data = change.doc.data();
+                    if (change.doc.id !== player.id) players[change.doc.id] = data;
+                    else if (!player.initialized) {
+                        player.money = data.money ?? 10;
+                        player.initialized = true;
+                    }
+                });
+                updatePeerList();
+            });
+
+            // World Sync
+            const worldRef = doc(db, 'artifacts', appId, 'public', 'data', 'room_maps', roomCode);
+            onSnapshot(worldRef, (snap) => {
+                world = snap.exists() ? snap.data().tiles : {};
+                if (!snap.exists()) seedMap('farming');
+            });
+
+            setInterval(syncSelf, 200); // slightly faster sync for races
+            requestAnimationFrame(gameLoop);
+            setInterval(processGameLogic, 500); // 2 ticks per second for timers
+        }
+
+        // --- World Generation ---
+        async function seedMap(type) {
+            if (!auth.currentUser) return;
+            const tiles = {};
+
+            if (type === 'farming') {
+                for (let i = 0; i < 100; i++) tiles[`${rand(GRID_SIZE)},${rand(GRID_SIZE)}`] = { type: 'weed' };
+            }
+            else if (type === 'reapers') {
+                // Very dense weeds
+                for (let i = 0; i < 600; i++) tiles[`${rand(GRID_SIZE)},${rand(GRID_SIZE)}`] = { type: 'weed' };
+            }
+            else if (type === 'mushrooms') {
+                // Dense forest maze
+                for (let x = 0; x < GRID_SIZE; x++) {
+                    for (let y = 0; y < GRID_SIZE; y++) {
+                        if (Math.random() > 0.3) tiles[`${x},${y}`] = { type: 'tree' };
+                    }
+                }
+                // Clear spawn area
+                for (let x = 22; x <= 28; x++) for (let y = 22; y <= 28; y++) delete tiles[`${x},${y}`];
+
+                // Place mushrooms
+                for (let i = 0; i < 80; i++) tiles[`${rand(GRID_SIZE)},${rand(GRID_SIZE)}`] = { type: 'shroom_brown' };
+                // 1 Magic Mushroom hidden in trees
+                let mx = rand(GRID_SIZE), my = rand(GRID_SIZE);
+                while (tiles[`${mx},${my}`]?.type !== 'tree' && mx > 20 && mx < 30) { mx = rand(GRID_SIZE); my = rand(GRID_SIZE); }
+                tiles[`${mx},${my}`] = { type: 'shroom_magic' };
+            }
+            else if (type === 'pond') {
+                // Winding river
+                for (let y = 0; y < GRID_SIZE; y++) {
+                    const center = Math.floor(25 + Math.sin(y * 0.3) * 8);
+                    for (let x = center - 5; x <= center + 5; x++) tiles[`${x},${y}`] = { type: 'water' };
+                    tiles[`${center - 6},${y}`] = { type: 'reeds' };
+                    tiles[`${center + 6},${y}`] = { type: 'reeds' };
+                    if (Math.random() > 0.7) tiles[`${center + rand(8) - 4},${y}`] = { type: 'reeds' }; // obstacles
+                }
+            }
+            else if (type === 'swimmer') {
+                // Islands at top and bottom, deep water in between
+                for (let y = 0; y < GRID_SIZE; y++) {
+                    if (y < 5 || y > GRID_SIZE - 6) continue; // Safe zones
+                    for (let x = 0; x < GRID_SIZE; x++) tiles[`${x},${y}`] = { type: 'deep_water' };
+                }
+            }
+
+            const worldRef = doc(db, 'artifacts', appId, 'public', 'data', 'room_maps', roomCode);
+            await setDoc(worldRef, { tiles });
+        }
+
+        // --- State Management ---
+        function handleGameStateChange() {
+            const lobby = document.getElementById('lobby-screen');
+            const hud = document.getElementById('game-hud');
+            const toolbar = document.getElementById('toolbar');
+            const victory = document.getElementById('victory-screen');
+            const vCard = document.getElementById('victory-card');
+
+            if (metadata.currentGame === 'lobby') {
+                lobby.classList.remove('hidden');
+                hud.classList.add('hidden');
+                toolbar.classList.add('hidden');
+                victory.classList.add('hidden');
+                player.active = false;
+            }
+            else {
+                lobby.classList.add('hidden');
+                hud.classList.remove('hidden');
+
+                if (metadata.currentGame === 'farming') toolbar.classList.remove('hidden');
+                else toolbar.classList.add('hidden');
+
+                if (metadata.status === 'playing') {
+                    victory.classList.add('hidden');
+                    vCard.classList.remove('scale-100');
+                    if (!player.active) setupPlayerForGame(metadata.currentGame);
+                    player.active = true;
+                }
+                else if (metadata.status === 'ended') {
+                    player.active = false; // Freeze movement
+                    document.getElementById('victory-player').innerText = metadata.winner || "NO ONE";
+                    victory.classList.remove('hidden');
+                    setTimeout(() => vCard.classList.add('scale-100'), 50);
+                }
+
+                updateHudLabels(metadata.currentGame);
+            }
+        }
+
+        function setupPlayerForGame(game) {
+            player.score = 0;
+            if (game === 'farming') { player.x = 10; player.y = 10; }
+            else if (game === 'reapers') { player.x = rand(GRID_SIZE); player.y = rand(GRID_SIZE); }
+            else if (game === 'pond') { player.x = 25; player.y = 2; }
+            else if (game === 'mushrooms') { player.x = 25; player.y = 25; }
+            else if (game === 'swimmer') { player.x = 25; player.y = 2; }
+            syncSelf();
+        }
+
+        window.hostGame = async (game) => {
+            if (!auth.currentUser) return;
+            const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'room_metadata', roomCode);
+            await setDoc(metaRef, { currentGame: game, status: 'playing', startTime: Date.now(), winner: null }, { merge: true });
+            seedMap(game);
+        };
+
+        window.endGame = async (winnerName) => {
+            if (!auth.currentUser || metadata.status === 'ended') return;
+            const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'room_metadata', roomCode);
+            await setDoc(metaRef, { status: 'ended', winner: winnerName }, { merge: true });
+        };
+
+        window.backToLobby = () => hostGame('lobby');
+
+        // --- UI Updates ---
+        function updateHudLabels(game) {
+            const l1 = document.getElementById('hud-label-1');
+            const l2 = document.getElementById('hud-label-2');
+            const stat2 = document.getElementById('hud-stat-2');
+            const div = document.getElementById('hud-divider');
+            const title = document.getElementById('game-title-display');
+            const timerCont = document.getElementById('timer-display');
+
+            title.innerText = game.replace('_', ' ').toUpperCase();
+            stat2.classList.remove('hidden');
+            div.classList.remove('hidden');
+
+            if (game === 'farming') {
+                l1.innerText = "Wallet"; l2.innerText = "Backpack";
+                timerCont.innerText = "∞";
+            }
+            else if (game === 'reapers') {
+                l1.innerText = "Score";
+                stat2.classList.add('hidden'); div.classList.add('hidden');
+            }
+            else {
+                l1.innerText = "Status";
+                stat2.classList.add('hidden'); div.classList.add('hidden');
+            }
+            refreshHudValues();
+        }
+
+        function refreshHudValues() {
+            const v1 = document.getElementById('hud-value-1');
+            const v2 = document.getElementById('hud-value-2');
+
+            if (metadata.currentGame === 'farming') {
+                v1.innerText = `💰 ${player.money}`;
+                v2.innerText = `🌾 ${player.inv}`;
+            } else if (metadata.currentGame === 'reapers') {
+                v1.innerText = `⭐ ${player.score}`;
+            } else {
+                v1.innerText = `🏃 RACING`;
+            }
+        }
+
+        // --- Server-like Logic Processing ---
+        async function processGameLogic() {
+            if (!auth.currentUser || metadata.status !== 'playing') return;
+
+            // Farming Growth
+            if (metadata.currentGame === 'farming') {
+                const newWorld = { ...world };
+                let changed = false;
+                for (let k in newWorld) {
+                    const t = newWorld[k];
+                    if (t.plant === 'wheat' && t.watered && t.age < 3 && Math.random() > 0.5) {
+                        t.age++; t.watered = false; changed = true;
+                    }
+                }
+                if (changed) {
+                    const worldRef = doc(db, 'artifacts', appId, 'public', 'data', 'room_maps', roomCode);
+                    await setDoc(worldRef, { tiles: newWorld });
+                }
+            }
+
+            // Timers & Win Conditions
+            if (metadata.currentGame === 'reapers') {
+                const elapsed = Math.floor((Date.now() - metadata.startTime) / 1000);
+                const remaining = Math.max(0, 60 - elapsed);
+                document.getElementById('timer-display').innerText = formatTime(remaining);
+
+                if (remaining === 0) {
+                    // Find highest score locally
+                    let bestScore = player.score;
+                    let bestName = player.name;
+                    for (let id in players) {
+                        if (players[id].score > bestScore) {
+                            bestScore = players[id].score;
+                            bestName = players[id].name;
+                        }
+                    }
+                    endGame(bestName);
+                }
+            } else if (metadata.currentGame !== 'farming') {
+                const elapsed = Math.floor((Date.now() - metadata.startTime) / 1000);
+                document.getElementById('timer-display').innerText = formatTime(elapsed);
+            }
+        }
+
+        // --- Input & Movement ---
+        window.addEventListener('keydown', (e) => {
+            if (document.activeElement.tagName === 'INPUT') return;
+
+            // Manual interactions (Farming only)
+            if (e.key === ' ' && metadata.currentGame === 'farming' && player.active) {
+                interactFarming();
+                return;
+            }
+
+            if (!player.active) return;
+
+            let dx = 0, dy = 0;
+            if (['ArrowUp', 'w'].includes(e.key)) dy = -1;
+            if (['ArrowDown', 's'].includes(e.key)) dy = 1;
+            if (['ArrowLeft', 'a'].includes(e.key)) dx = -1;
+            if (['ArrowRight', 'd'].includes(e.key)) dx = 1;
+
+            if (dx !== 0 || dy !== 0) {
+                const nx = player.x + dx, ny = player.y + dy;
+                if (nx >= 0 && nx < GRID_SIZE && ny >= 0 && ny < GRID_SIZE) {
+                    const t = world[`${nx},${ny}`];
+
+                    // Specific Game Movement Rules
+                    if (metadata.currentGame === 'pond' && t?.type === 'reeds' && Math.random() > 0.4) return; // Slow down
+
+                    player.x = nx; player.y = ny;
+                    handleAutoInteract(nx, ny, t); // Fast-paced interactions
+                }
+            }
+        });
+
+        // Auto-interactions for party games (no spacebar needed)
+        function handleAutoInteract(nx, ny, tile) {
+            if (metadata.currentGame === 'reapers' && tile?.type === 'weed') {
+                player.score += 10;
+                updateTile(nx, ny, null);
+                refreshHudValues();
+            }
+            else if (metadata.currentGame === 'mushrooms') {
+                if (tile?.type === 'shroom_magic') {
+                    updateTile(nx, ny, null);
+                    endGame(player.name);
+                } else if (tile?.type === 'shroom_brown') {
+                    updateTile(nx, ny, null);
+                }
+            }
+            else if (metadata.currentGame === 'pond' && ny >= GRID_SIZE - 2) {
+                endGame(player.name);
+            }
+            else if (metadata.currentGame === 'swimmer' && ny >= GRID_SIZE - 5) {
+                endGame(player.name);
+            }
+        }
+
+        // Manual interactions for farming
+        function interactFarming() {
+            const key = `${player.x},${player.y}`;
+            const tile = world[key];
+
+            if (player.x === BIN_POS.x && player.y === BIN_POS.y && player.inv > 0) {
+                player.money += player.inv * 5; player.inv = 0;
+                refreshHudValues(); return;
+            }
+
+            if (player.tool === 'hoe' && !tile) updateTile(player.x, player.y, { type: 'tilled', age: 0 });
+            else if (player.tool === 'seeds' && tile?.type === 'tilled' && !tile.plant && player.money >= 2) {
+                player.money -= 2; updateTile(player.x, player.y, { plant: 'wheat', age: 1 });
+            }
+            else if (player.tool === 'water' && tile?.type === 'tilled') updateTile(player.x, player.y, { watered: true });
+            else if (player.tool === 'scythe') {
+                if (tile?.type === 'weed') updateTile(player.x, player.y, null);
+                else if (tile?.plant && tile.age >= 3) {
+                    player.inv++; updateTile(player.x, player.y, { plant: null, age: 0 });
+                } else if (tile?.type === 'tilled' && !tile.plant) updateTile(player.x, player.y, null);
+            }
+            refreshHudValues();
+        }
+
+        // --- Core Sync & Data functions ---
+        const rand = (n) => Math.floor(Math.random() * n);
+        const formatTime = (s) => `${Math.floor(s / 60).toString().padStart(2, '0')}:${(s % 60).toString().padStart(2, '0')}`;
+
+        async function syncSelf() {
+            if (!auth.currentUser || metadata.currentGame === 'lobby') return;
+            const ref = doc(db, 'artifacts', appId, 'public', 'data', 'players_' + roomCode, auth.currentUser.uid);
+            await setDoc(ref, { name: player.name, x: player.x, y: player.y, score: player.score, money: player.money, lastUpdate: Date.now() }, { merge: true });
+        }
+
+        async function updateTile(x, y, data) {
+            if (!auth.currentUser) return;
+            const ref = doc(db, 'artifacts', appId, 'public', 'data', 'room_maps', roomCode);
+            const newWorld = { ...world };
+            if (data === null) delete newWorld[`${x},${y}`];
+            else newWorld[`${x},${y}`] = { ...(newWorld[`${x},${y}`] || {}), ...data };
+            await setDoc(ref, { tiles: newWorld });
+        }
+
+        // --- Rendering Engine ---
+        function gameLoop() {
+            resize();
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            if (metadata.currentGame === 'lobby') return requestAnimationFrame(gameLoop);
+
+            // Smooth camera follow
+            const targetCamX = canvas.width / 2 - (player.x * TILE_SIZE) - TILE_SIZE / 2;
+            const targetCamY = canvas.height / 2 - (player.y * TILE_SIZE) - TILE_SIZE / 2;
+
+            ctx.save();
+            ctx.translate(targetCamX, targetCamY);
+
+            // Environment Base
+            if (metadata.currentGame === 'pond' || metadata.currentGame === 'swimmer') ctx.fillStyle = '#0f172a';
+            else ctx.fillStyle = '#1e293b';
+            ctx.fillRect(-TILE_SIZE * 10, -TILE_SIZE * 10, (GRID_SIZE + 20) * TILE_SIZE, (GRID_SIZE + 20) * TILE_SIZE);
+
+            // Draw Finish Lines for races
+            if (metadata.currentGame === 'pond' || metadata.currentGame === 'swimmer') {
+                ctx.fillStyle = 'rgba(255,255,255,0.1)';
+                const finishY = metadata.currentGame === 'pond' ? (GRID_SIZE - 2) * TILE_SIZE : (GRID_SIZE - 5) * TILE_SIZE;
+                ctx.fillRect(0, finishY, GRID_SIZE * TILE_SIZE, TILE_SIZE);
+                ctx.fillStyle = 'white'; ctx.font = '20px font-bold';
+                for (let i = 0; i < GRID_SIZE; i += 4) ctx.fillText('🏁 FINISH 🏁', i * TILE_SIZE, finishY + TILE_SIZE * 0.7);
+            }
+
+            // Render World Tiles
+            ctx.textAlign = 'center';
+            for (let key in world) {
+                const [tx, ty] = key.split(',').map(Number);
+                const t = world[key];
+                const px = tx * TILE_SIZE, py = ty * TILE_SIZE;
+
+                if (t.type === 'tilled') {
+                    ctx.fillStyle = t.watered ? '#422006' : '#713f12';
+                    ctx.beginPath(); ctx.roundRect(px + 4, py + 4, TILE_SIZE - 8, TILE_SIZE - 8, 8); ctx.fill();
+                }
+                if (t.type === 'water' || t.type === 'deep_water') {
+                    ctx.fillStyle = t.type === 'water' ? '#0ea5e9' : '#0284c7';
+                    ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
+                }
+
+                ctx.font = `${TILE_SIZE * 0.6}px Arial`;
+                if (t.type === 'weed') ctx.fillText('🌿', px + TILE_SIZE / 2, py + TILE_SIZE * 0.75);
+                if (t.type === 'reeds') ctx.fillText('🌾', px + TILE_SIZE / 2, py + TILE_SIZE * 0.75);
+                if (t.type === 'tree') ctx.fillText('🌲', px + TILE_SIZE / 2, py + TILE_SIZE * 0.75);
+
+                if (t.type === 'shroom_brown') {
+                    ctx.save();
+                    // Safe way to make a brown mushroom without breaking older browsers
+                    ctx.filter = 'grayscale(1) sepia(0.5)';
+                    ctx.fillText('🍄', px + TILE_SIZE / 2, py + TILE_SIZE * 0.75);
+                    ctx.restore();
+                }
+                if (t.type === 'shroom_magic') {
+                    ctx.save();
+                    // Add a glowing effect so it feels special
+                    ctx.shadowColor = '#fbbf24';
+                    ctx.shadowBlur = 15;
+                    ctx.fillText('🍄', px + TILE_SIZE / 2, py + TILE_SIZE * 0.75);
+                    ctx.restore();
+                }
+
+                if (t.plant === 'wheat') {
+                    let emo = t.age >= 3 ? '🌾' : (t.age === 2 ? '🌿' : '🌱');
+                    ctx.fillText(emo, px + TILE_SIZE / 2, py + TILE_SIZE * 0.8);
+                }
+            }
+
+            // Draw Farming Shed
+            if (metadata.currentGame === 'farming') {
+                ctx.fillStyle = '#6b4226';
+                ctx.fillRect(BIN_POS.x * TILE_SIZE, BIN_POS.y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+                ctx.font = '24px Arial'; ctx.fillText('📦', BIN_POS.x * TILE_SIZE + TILE_SIZE / 2, BIN_POS.y * TILE_SIZE + TILE_SIZE * 0.65);
+            }
+
+            // Render Players
+            const drawP = (p, isMe) => {
+                if (!isMe && Date.now() - p.lastUpdate > 10000) return;
+                ctx.font = `${TILE_SIZE * 0.7}px Arial`;
+
+                // Animation bounce
+                const bounce = Math.sin(Date.now() * 0.01 + p.x + p.y) * 4;
+                ctx.fillText(isMe ? '🤠' : '👨‍🌾', p.x * TILE_SIZE + TILE_SIZE / 2, p.y * TILE_SIZE + TILE_SIZE * 0.8 + bounce);
+
+                ctx.font = '12px Inter'; ctx.fillStyle = isMe ? '#34d399' : 'white';
+                ctx.fillText(p.name, p.x * TILE_SIZE + TILE_SIZE / 2, p.y * TILE_SIZE - 5 + bounce);
+
+                // Reapers specific score overhead
+                if (metadata.currentGame === 'reapers' && !isMe) {
+                    ctx.fillStyle = '#fbbf24'; ctx.font = 'bold 10px Inter';
+                    ctx.fillText(p.score, p.x * TILE_SIZE + TILE_SIZE / 2, p.y * TILE_SIZE - 20 + bounce);
+                }
+            };
+            for (let id in players) drawP(players[id], false);
+            drawP(player, true);
+
+            // Render Crocodiles for Speed Swimmer
+            if (metadata.currentGame === 'swimmer') {
+                ctx.font = `${TILE_SIZE * 0.7}px Arial`;
+                for (let i = 0; i < 15; i++) {
+                    const cy = (6 + i * 2.5); // Rows
+                    const speed = (i % 2 === 0 ? 1 : -1) * (0.003 + (i % 3) * 0.001);
+                    // Deterministic horizontal sync based on global time
+                    let cx = ((Date.now() * speed) + i * 1000) % (GRID_SIZE * TILE_SIZE + TILE_SIZE);
+                    if (cx < -TILE_SIZE) cx += GRID_SIZE * TILE_SIZE + TILE_SIZE * 2;
+
+                    // Mirror emoji direction based on speed
+                    ctx.save();
+                    ctx.translate(cx, cy * TILE_SIZE + TILE_SIZE * 0.7);
+                    if (speed < 0) ctx.scale(-1, 1);
+                    ctx.fillText('🐊', 0, 0);
+                    ctx.restore();
+
+                    // Collision detection
+                    if (player.active && Math.abs(player.x * TILE_SIZE - cx) < TILE_SIZE * 0.7 && Math.abs(player.y * TILE_SIZE - cy * TILE_SIZE) < TILE_SIZE * 0.7) {
+                        player.x = 25; player.y = 2; // CHOMP! Back to start
+                        showToast("Chomped by a Crocodile! Back to start!");
+                    }
+                }
+            }
+
+            ctx.restore();
+            requestAnimationFrame(gameLoop);
+        }
+
+        function resize() {
+            if (canvas.width !== window.innerWidth || canvas.height !== window.innerHeight) {
+                canvas.width = window.innerWidth; canvas.height = window.innerHeight;
+            }
+        }
+
+        // --- UI Interactions ---
+        window.setTool = (t) => {
+            player.tool = t;
+            document.querySelectorAll('#toolbar button').forEach(b => {
+                b.classList.remove('bg-emerald-600', 'border-white');
+                b.classList.add('bg-white/5', 'border-transparent');
+            });
+            document.getElementById(`tool-${t}`).classList.add('bg-emerald-600', 'border-white');
+        };
+
+        function updatePeerList() {
+            const list = document.getElementById('peer-list');
+            list.innerHTML = "";
+            const all = { [player.id]: player, ...players };
+            for (let id in all) {
+                const p = all[id];
+                if (Date.now() - p.lastUpdate > 10000) continue;
+                const div = document.createElement('div');
+                div.className = "flex items-center justify-between bg-white/5 p-3 rounded-xl border border-white/5 hover:bg-white/10 transition-colors";
+                div.innerHTML = `<span class="font-bold">🤠 ${p.name}</span><span class="text-[10px] opacity-50 font-mono">${id.slice(0, 4)}</span>`;
+                list.appendChild(div);
+            }
+        }
+
+        window.copyRoomCode = () => {
+            const dummy = document.createElement("input");
+            document.body.appendChild(dummy);
+            dummy.value = roomCode; dummy.select();
+            document.execCommand("copy");
+            document.body.removeChild(dummy);
+            showToast(`Room Code ${roomCode} copied!`);
+        };
+
+        init();
+    </script>
+
+</body>
+
+</html>

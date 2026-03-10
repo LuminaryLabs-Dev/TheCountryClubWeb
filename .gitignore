@@ -1,0 +1,20 @@
+# Dependencies
+node_modules/
+
+# Build artifacts
+dist/
+build/
+*.log
+*.tmp
+
+# IDE and OS files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Sass/Less compile artifacts (if source files are tracked)
+# The general rule is: track source, ignore generated files.
+# For example, if you use .less and compile to .css, you ignore .css files:
+# *.css 
+# !styles.css # use negation to track specific files if needed
