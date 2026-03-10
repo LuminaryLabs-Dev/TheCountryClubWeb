@@ -285,7 +285,7 @@
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
         const db = getFirestore(app);
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'country-club-party';
+        const appId = 'country-club-party';
 
         const TILE_SIZE = 64;
         const GRID_SIZE = 50;
@@ -298,7 +298,10 @@
         let world = {};
         let metadata = { currentGame: 'lobby', status: 'waiting', timer: 0, winner: null };
         let lastRenderTime = 0;
-        let isSyncing = false;
+        let unsubs = [];
+        let syncInterval = null;
+        let logicInterval = null;
+        let isLooping = false;
 
         const canvas = document.getElementById('stage');
         const ctx = canvas.getContext('2d');
@@ -335,28 +338,41 @@
         }
 
         window.saveProfile = () => {
-            if (isSyncing) return;
             const nameInput = document.getElementById('name-input').value.trim();
             const codeInput = document.getElementById('room-input').value.trim().toUpperCase();
 
             player.name = nameInput || "Player" + Math.floor(Math.random() * 1000);
-            roomCode = codeInput || Math.random().toString(36).substring(2, 6).toUpperCase();
+            const nextRoom = codeInput || Math.random().toString(36).substring(2, 6).toUpperCase();
 
-            try {
-                const newUrl = window.location.protocol + "//" + window.location.host + window.location.pathname + '?room=' + roomCode;
-                window.history.replaceState({ path: newUrl }, '', newUrl);
-            } catch (e) { }
-
-            startSync();
+            if (nextRoom !== roomCode) {
+                roomCode = nextRoom;
+                try {
+                    const newUrl = window.location.protocol + "//" + window.location.host + window.location.pathname + '?room=' + roomCode;
+                    window.history.replaceState({ path: newUrl }, '', newUrl);
+                } catch (e) { }
+                startSync();
+            } else {
+                showToast("Already in Room " + roomCode);
+            }
         };
 
+        function stopSync() {
+            unsubs.forEach(unsub => unsub());
+            unsubs = [];
+            if (syncInterval) clearInterval(syncInterval);
+            if (logicInterval) clearInterval(logicInterval);
+            players = {};
+        }
+
         function startSync() {
-            if (!auth.currentUser || isSyncing) return;
-            isSyncing = true;
+            if (!auth.currentUser) return;
+            stopSync();
+
+            showToast("Connecting to " + roomCode + "...");
 
             // Metadata Sync
             const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'room_metadata', roomCode);
-            onSnapshot(metaRef, (snap) => {
+            const unsubMeta = onSnapshot(metaRef, (snap) => {
                 if (snap.exists()) {
                     metadata = snap.data();
                     handleGameStateChange();
@@ -364,31 +380,41 @@
                     setDoc(metaRef, { currentGame: 'lobby', status: 'waiting', startTime: Date.now(), winner: null });
                 }
             });
+            unsubs.push(unsubMeta);
 
             // Player Sync
             const playersRef = collection(db, 'artifacts', appId, 'public', 'data', 'players_' + roomCode);
-            onSnapshot(playersRef, (snapshot) => {
+            const unsubPlayers = onSnapshot(playersRef, (snapshot) => {
                 snapshot.docChanges().forEach(change => {
-                    const data = change.doc.data();
-                    if (change.doc.id !== player.id) players[change.doc.id] = data;
-                    else if (!player.initialized) {
-                        player.money = data.money ?? 10;
-                        player.initialized = true;
+                    if (change.type === 'removed') {
+                        delete players[change.doc.id];
+                    } else {
+                        const data = change.doc.data();
+                        if (change.doc.id !== player.id) players[change.doc.id] = data;
+                        else if (!player.initialized) {
+                            player.money = data.money ?? 10;
+                            player.initialized = true;
+                        }
                     }
                 });
                 updatePeerList();
             });
+            unsubs.push(unsubPlayers);
 
             // World Sync
             const worldRef = doc(db, 'artifacts', appId, 'public', 'data', 'room_maps', roomCode);
-            onSnapshot(worldRef, (snap) => {
+            const unsubWorld = onSnapshot(worldRef, (snap) => {
                 world = snap.exists() ? snap.data().tiles : {};
                 if (!snap.exists()) seedMap('farming');
             });
+            unsubs.push(unsubWorld);
 
-            setInterval(syncSelf, 200); // slightly faster sync for races
-            requestAnimationFrame(gameLoop);
-            setInterval(processGameLogic, 500); // 2 ticks per second for timers
+            syncInterval = setInterval(syncSelf, 200);
+            if (!isLooping) {
+                isLooping = true;
+                requestAnimationFrame(gameLoop);
+            }
+            logicInterval = setInterval(processGameLogic, 500);
         }
 
         // --- World Generation ---
