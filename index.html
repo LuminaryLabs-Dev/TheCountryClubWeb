@@ -293,12 +293,12 @@
 
         // --- Game State ---
         let roomCode = "";
-        let roomPath = "";
-        let player = { id: null, name: "Farmer", x: 10, y: 10, money: 10, inv: 0, score: 0, tool: 'hoe', active: false, initialized: false };
+        let player = { id: null, name: "Farmer", x: 10, y: 10, money: 10, inv: 0, score: 0, tool: 'hoe', active: false, initialized: false, lastUpdate: Date.now() };
         let players = {};
         let world = {};
         let metadata = { currentGame: 'lobby', status: 'waiting', timer: 0, winner: null };
         let lastRenderTime = 0;
+        let isSyncing = false;
 
         const canvas = document.getElementById('stage');
         const ctx = canvas.getContext('2d');
@@ -335,6 +335,7 @@
         }
 
         window.saveProfile = () => {
+            if (isSyncing) return;
             const nameInput = document.getElementById('name-input').value.trim();
             const codeInput = document.getElementById('room-input').value.trim().toUpperCase();
 
@@ -350,7 +351,8 @@
         };
 
         function startSync() {
-            if (!auth.currentUser) return;
+            if (!auth.currentUser || isSyncing) return;
+            isSyncing = true;
 
             // Metadata Sync
             const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'room_metadata', roomCode);
@@ -674,7 +676,7 @@
         const formatTime = (s) => `${Math.floor(s / 60).toString().padStart(2, '0')}:${(s % 60).toString().padStart(2, '0')}`;
 
         async function syncSelf() {
-            if (!auth.currentUser || metadata.currentGame === 'lobby') return;
+            if (!auth.currentUser) return;
             const ref = doc(db, 'artifacts', appId, 'public', 'data', 'players_' + roomCode, auth.currentUser.uid);
             await setDoc(ref, { name: player.name, x: player.x, y: player.y, score: player.score, money: player.money, lastUpdate: Date.now() }, { merge: true });
         }
@@ -839,7 +841,7 @@
             const all = { [player.id]: player, ...players };
             for (let id in all) {
                 const p = all[id];
-                if (Date.now() - p.lastUpdate > 10000) continue;
+                if (p.lastUpdate && Date.now() - p.lastUpdate > 10000) continue;
                 const div = document.createElement('div');
                 div.className = "flex items-center justify-between bg-white/5 p-3 rounded-xl border border-white/5 hover:bg-white/10 transition-colors";
                 div.innerHTML = `<span class="font-bold">🤠 ${p.name}</span><span class="text-[10px] opacity-50 font-mono">${id.slice(0, 4)}</span>`;
