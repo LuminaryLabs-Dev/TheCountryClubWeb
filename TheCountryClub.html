@@ -272,7 +272,15 @@
         import { getFirestore, doc, setDoc, onSnapshot, collection } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // --- Configuration ---
-        const firebaseConfig = JSON.parse(__firebase_config);
+        const firebaseConfig = {
+            apiKey: "AIzaSyB69te4tXgErFsBoKA2qqzXebgncanX1iM",
+            authDomain: "thecountryclubweb.firebaseapp.com",
+            projectId: "thecountryclubweb",
+            storageBucket: "thecountryclubweb.firebasestorage.app",
+            messagingSenderId: "754750739958",
+            appId: "1:754750739958:web:8dc15521b553006f29e3d7",
+            measurementId: "G-W28TWKSGG7"
+        };
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
         const db = getFirestore(app);
@@ -822,6 +830,8 @@
             document.getElementById(`tool-${t}`).classList.add('bg-emerald-600', 'border-white');
         };
 
+
+
         function updatePeerList() {
             const list = document.getElementById('peer-list');
             list.innerHTML = "";
@@ -846,7 +856,11 @@
         };
 
         init();
+
+
     </script>
+
+
 
 </body>
 
