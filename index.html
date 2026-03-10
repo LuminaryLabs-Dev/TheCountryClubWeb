@@ -6,6 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>The Country Club: Party Games</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
     <style>
         body {
             margin: 0;
@@ -267,24 +268,7 @@
     <canvas id="stage"></canvas>
 
     <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, setDoc, onSnapshot, collection } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-
         // --- Configuration ---
-        const firebaseConfig = {
-            apiKey: "AIzaSyB69te4tXgErFsBoKA2qqzXebgncanX1iM",
-            authDomain: "thecountryclubweb.firebaseapp.com",
-            databaseURL: "https://thecountryclubweb-default-rtdb.firebaseio.com/",
-            projectId: "thecountryclubweb",
-            storageBucket: "thecountryclubweb.firebasestorage.app",
-            messagingSenderId: "754750739958",
-            appId: "1:754750739958:web:8dc15521b553006f29e3d7",
-            measurementId: "G-W28TWKSGG7"
-        };
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const db = getFirestore(app);
         const appId = 'country-club-party';
 
         const TILE_SIZE = 64;
@@ -303,6 +287,11 @@
         let logicInterval = null;
         let isLooping = false;
 
+        let peer = null;
+        let connections = [];
+        let isHost = false;
+        let myId = null;
+
         const canvas = document.getElementById('stage');
         const ctx = canvas.getContext('2d');
 
@@ -315,26 +304,14 @@
             setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 300); }, 3000);
         };
 
-        // --- Authentication & Initialization ---
+        // --- Networking & Initialization ---
         async function init() {
-            try {
-                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                    await signInWithCustomToken(auth, __initial_auth_token);
-                } else {
-                    await signInAnonymously(auth);
-                }
-                onAuthStateChanged(auth, (user) => {
-                    if (user) {
-                        player.id = user.uid;
-                        document.getElementById('loading-overlay').style.display = 'none';
-                        document.getElementById('lobby-screen').classList.remove('hidden');
+            document.getElementById('loading-overlay').style.display = 'none';
+            document.getElementById('lobby-screen').classList.remove('hidden');
 
-                        const urlParams = new URLSearchParams(window.location.search);
-                        const r = urlParams.get('room');
-                        if (r) document.getElementById('room-input').value = r.toUpperCase();
-                    }
-                });
-            } catch (e) { console.error(e); }
+            const urlParams = new URLSearchParams(window.location.search);
+            const r = urlParams.get('room');
+            if (r) document.getElementById('room-input').value = r.toUpperCase();
         }
 
         window.saveProfile = () => {
@@ -357,69 +334,132 @@
         };
 
         function stopSync() {
-            unsubs.forEach(unsub => unsub());
-            unsubs = [];
+            if (peer) {
+                peer.destroy();
+                peer = null;
+            }
             if (syncInterval) clearInterval(syncInterval);
             if (logicInterval) clearInterval(logicInterval);
+            connections = [];
             players = {};
+            isHost = false;
+            isLooping = false;
         }
 
         function startSync() {
-            if (!auth.currentUser) return;
             stopSync();
+            if (!roomCode) return;
 
-            showToast("Connecting to " + roomCode + "...");
+            const hostId = appId + '-' + roomCode;
+            showToast("Joining " + roomCode + "...");
 
-            // Metadata Sync
-            const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'room_metadata', roomCode);
-            const unsubMeta = onSnapshot(metaRef, (snap) => {
-                if (snap.exists()) {
-                    metadata = snap.data();
-                    handleGameStateChange();
+            // Try to become host first
+            peer = new Peer(hostId);
+
+            peer.on('open', (id) => {
+                isHost = true;
+                myId = id;
+                player.id = id;
+                showToast("Hosting Room: " + roomCode);
+
+                peer.on('connection', (conn) => {
+                    connections.push(conn);
+                    updatePeerList();
+                    conn.on('data', (data) => handleDataFromClient(conn, data));
+                    conn.on('close', () => {
+                        connections = connections.filter(c => c !== conn);
+                        // cleanup player on disconnect if host
+                    });
+                });
+
+                // Host-only logic
+                if (!logicInterval) logicInterval = setInterval(processGameLogic, 500);
+                if (!syncInterval) syncInterval = setInterval(broadcastState, 200);
+                if (!isLooping) { isLooping = true; requestAnimationFrame(gameLoop); }
+            });
+
+            peer.on('error', (err) => {
+                if (err.type === 'unavailable-id') {
+                    // ID taken, someone else is host. Join as client.
+                    peer.destroy();
+                    peer = new Peer();
+                    peer.on('open', (id) => {
+                        myId = id;
+                        player.id = id;
+                        const conn = peer.connect(hostId);
+                        setupClientConnection(conn);
+                    });
                 } else {
-                    setDoc(metaRef, { currentGame: 'lobby', status: 'waiting', startTime: Date.now(), winner: null });
+                    console.error("Peer Error:", err);
+                    showToast("Connection Error: " + err.type);
                 }
             });
-            unsubs.push(unsubMeta);
+        }
 
-            // Player Sync
-            const playersRef = collection(db, 'artifacts', appId, 'public', 'data', 'players_' + roomCode);
-            const unsubPlayers = onSnapshot(playersRef, (snapshot) => {
-                snapshot.docChanges().forEach(change => {
-                    if (change.type === 'removed') {
-                        delete players[change.doc.id];
-                    } else {
-                        const data = change.doc.data();
-                        if (change.doc.id !== player.id) players[change.doc.id] = data;
-                        else if (!player.initialized) {
-                            player.money = data.money ?? 10;
-                            player.initialized = true;
-                        }
-                    }
-                });
-                updatePeerList();
+        function setupClientConnection(conn) {
+            conn.on('open', () => {
+                connections = [conn];
+                showToast("Connected to Host!");
+                conn.on('data', (data) => handleDataFromHost(data));
+
+                if (!syncInterval) syncInterval = setInterval(syncSelf, 200);
+                if (!isLooping) { isLooping = true; requestAnimationFrame(gameLoop); }
             });
-            unsubs.push(unsubPlayers);
-
-            // World Sync
-            const worldRef = doc(db, 'artifacts', appId, 'public', 'data', 'room_maps', roomCode);
-            const unsubWorld = onSnapshot(worldRef, (snap) => {
-                world = snap.exists() ? snap.data().tiles : {};
-                if (!snap.exists()) seedMap('farming');
+            conn.on('close', () => {
+                showToast("Disconnected from Host");
+                stopSync();
             });
-            unsubs.push(unsubWorld);
+            conn.on('error', (err) => {
+                console.error("Conn Error:", err);
+                showToast("Connection Failed");
+            });
+        }
 
-            syncInterval = setInterval(syncSelf, 200);
-            if (!isLooping) {
-                isLooping = true;
-                requestAnimationFrame(gameLoop);
+        // --- Data Handling ---
+        function broadcastState() {
+            if (!isHost) return;
+            const fullState = {
+                type: 'state_update',
+                world: world,
+                metadata: metadata,
+                players: { [player.id]: player, ...players }
+            };
+            connections.forEach(conn => {
+                if (conn.open) conn.send(fullState);
+            });
+        }
+
+        function handleDataFromClient(conn, data) {
+            if (data.type === 'player_update') {
+                players[data.player.id] = data.player;
+                players[data.player.id].lastUpdate = Date.now();
             }
-            logicInterval = setInterval(processGameLogic, 500);
+            else if (data.type === 'tile_update') {
+                // Clients request tile changes, host applies them
+                updateTileLocal(data.x, data.y, data.data);
+            }
+            else if (data.type === 'action_game') {
+                if (data.action === 'host') hostGame(data.game);
+                if (data.action === 'back') backToLobby();
+            }
+        }
+
+        function handleDataFromHost(data) {
+            if (data.type === 'state_update') {
+                world = data.world;
+                metadata = data.metadata;
+                // Update other players, but don't overwrite yourself
+                for (let id in data.players) {
+                    if (id !== player.id) players[id] = data.players[id];
+                }
+                handleGameStateChange();
+                updatePeerList();
+            }
         }
 
         // --- World Generation ---
         async function seedMap(type) {
-            if (!auth.currentUser) return;
+            if (!isHost) return;
             const tiles = {};
 
             if (type === 'farming') {
@@ -464,8 +504,8 @@
                 }
             }
 
-            const worldRef = doc(db, 'artifacts', appId, 'public', 'data', 'room_maps', roomCode);
-            await setDoc(worldRef, { tiles });
+            world = tiles;
+            broadcastState(); // Force update world to everyone
         }
 
         // --- State Management ---
@@ -517,20 +557,30 @@
             syncSelf();
         }
 
-        window.hostGame = async (game) => {
-            if (!auth.currentUser) return;
-            const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'room_metadata', roomCode);
-            await setDoc(metaRef, { currentGame: game, status: 'playing', startTime: Date.now(), winner: null }, { merge: true });
+        window.hostGame = (game) => {
+            if (!isHost) {
+                // Clients request host to switch games
+                if (connections[0]) connections[0].send({ type: 'action_game', action: 'host', game: game });
+                return;
+            }
+            metadata = { currentGame: game, status: 'playing', startTime: Date.now(), winner: null };
             seedMap(game);
         };
 
-        window.endGame = async (winnerName) => {
-            if (!auth.currentUser || metadata.status === 'ended') return;
-            const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'room_metadata', roomCode);
-            await setDoc(metaRef, { status: 'ended', winner: winnerName }, { merge: true });
+        window.endGame = (winnerName) => {
+            if (!isHost || metadata.status === 'ended') return;
+            metadata.status = 'ended';
+            metadata.winner = winnerName;
+            broadcastState();
         };
 
-        window.backToLobby = () => hostGame('lobby');
+        window.backToLobby = () => {
+            if (!isHost) {
+                if (connections[0]) connections[0].send({ type: 'action_game', action: 'back' });
+                return;
+            }
+            hostGame('lobby');
+        };
 
         // --- UI Updates ---
         function updateHudLabels(game) {
@@ -575,22 +625,16 @@
         }
 
         // --- Server-like Logic Processing ---
-        async function processGameLogic() {
-            if (!auth.currentUser || metadata.status !== 'playing') return;
-
+        function processGameLogic() {
+            if (!isHost || metadata.status !== 'playing') return;
             // Farming Growth
             if (metadata.currentGame === 'farming') {
-                const newWorld = { ...world };
                 let changed = false;
-                for (let k in newWorld) {
-                    const t = newWorld[k];
+                for (let k in world) {
+                    const t = world[k];
                     if (t.plant === 'wheat' && t.watered && t.age < 3 && Math.random() > 0.5) {
                         t.age++; t.watered = false; changed = true;
                     }
-                }
-                if (changed) {
-                    const worldRef = doc(db, 'artifacts', appId, 'public', 'data', 'room_maps', roomCode);
-                    await setDoc(worldRef, { tiles: newWorld });
                 }
             }
 
@@ -702,18 +746,24 @@
         const formatTime = (s) => `${Math.floor(s / 60).toString().padStart(2, '0')}:${(s % 60).toString().padStart(2, '0')}`;
 
         async function syncSelf() {
-            if (!auth.currentUser) return;
-            const ref = doc(db, 'artifacts', appId, 'public', 'data', 'players_' + roomCode, auth.currentUser.uid);
-            await setDoc(ref, { name: player.name, x: player.x, y: player.y, score: player.score, money: player.money, lastUpdate: Date.now() }, { merge: true });
+            if (isHost) return; // Host doesn't need to sync to self via network
+            if (connections[0] && connections[0].open) {
+                connections[0].send({ type: 'player_update', player: player });
+            }
         }
 
-        async function updateTile(x, y, data) {
-            if (!auth.currentUser) return;
-            const ref = doc(db, 'artifacts', appId, 'public', 'data', 'room_maps', roomCode);
-            const newWorld = { ...world };
-            if (data === null) delete newWorld[`${x},${y}`];
-            else newWorld[`${x},${y}`] = { ...(newWorld[`${x},${y}`] || {}), ...data };
-            await setDoc(ref, { tiles: newWorld });
+        function updateTile(x, y, data) {
+            if (!isHost) {
+                // Clients request host to update tile
+                if (connections[0]) connections[0].send({ type: 'tile_update', x, y, data });
+                return;
+            }
+            updateTileLocal(x, y, data);
+        }
+
+        function updateTileLocal(x, y, data) {
+            if (data === null) delete world[`${x},${y}`];
+            else world[`${x},${y}`] = { ...(world[`${x},${y}`] || {}), ...data };
         }
 
         // --- Rendering Engine ---
