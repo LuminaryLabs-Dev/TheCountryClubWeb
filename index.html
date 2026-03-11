@@ -150,7 +150,11 @@
                 </div>
 
                 <div class="glass p-6 rounded-3xl flex flex-col max-h-[40vh]">
-                    <h3 class="text-xs font-bold uppercase opacity-50 mb-4 tracking-tighter">Peers in Room</h3>
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-xs font-bold uppercase opacity-50 tracking-tighter">Peers in Room</h3>
+                        <span id="player-count"
+                            class="bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded text-[10px] font-bold">0</span>
+                    </div>
                     <div id="peer-list" class="space-y-2 overflow-y-auto flex-1 pr-2 custom-scroll">
                         <!-- Peer list -->
                     </div>
@@ -382,18 +386,21 @@
             });
 
             peer.on('error', (err) => {
-                if (err.type === 'unavailable-id' || err.type === 'id-taken') {
+                if (err.type === 'unavailable-id' || err.type === 'id-taken' || err.type === 'peer-id-taken') {
                     // Host exists. Join as client.
+                    isHost = false;
                     peer.destroy();
                     peer = new Peer(null, { debug: 1 });
-                    myId = id;
-                    player.id = id;
-                    document.getElementById('connection-status').innerText = "CONNECTING...";
-                    // Wait a moment for host ID to propagate in signaling server
-                    setTimeout(() => {
-                        const conn = peer.connect(hostId, { reliable: true });
-                        setupClientConnection(conn);
-                    }, 1000);
+                    peer.on('open', (id) => {
+                        myId = id;
+                        player.id = id;
+                        document.getElementById('connection-status').innerText = "CONNECTING...";
+                        // Wait a moment for signaling server
+                        setTimeout(() => {
+                            const conn = peer.connect(hostId, { reliable: true });
+                            setupClientConnection(conn);
+                        }, 800);
+                    });
                 } else {
                     console.error("PeerJS Error:", err);
                     showToast("Network Error: " + err.type);
@@ -409,7 +416,7 @@
                 showToast("Connected to Host!");
                 conn.on('data', (data) => handleDataFromHost(data));
 
-                if (!syncInterval) syncInterval = setInterval(syncSelf, 200);
+                if (!syncInterval) syncInterval = setInterval(syncSelf, 100);
                 if (!isLooping) { isLooping = true; requestAnimationFrame(gameLoop); }
             });
             conn.on('close', () => {
@@ -601,10 +608,12 @@
 
         // Reliability check for sending commands
         function sendToHost(data) {
-            if (!isHost && connections[0] && connections[0].open) {
+            if (isHost) return true; // Host can handle its own actions
+            if (connections[0] && connections[0].open) {
                 connections[0].send(data);
                 return true;
             }
+            console.warn("sendToHost failed: No open connection", data);
             return false;
         }
 
@@ -942,18 +951,35 @@
             list.innerHTML = "";
             const all = { [player.id]: player, ...players };
             let count = 0;
+            const now = Date.now();
+
             for (let id in all) {
                 const p = all[id];
-                if (p.lastUpdate && Date.now() - p.lastUpdate > 10000) continue;
+                const isMe = id === player.id;
+                const lastUpdatedAgo = (now - (p.lastUpdate || now)) / 1000;
+
+                if (!isMe && lastUpdatedAgo > 10) continue;
+
                 count++;
                 const div = document.createElement('div');
                 div.className = "flex items-center justify-between bg-white/5 p-3 rounded-xl border border-white/5 hover:bg-white/10 transition-colors";
-                div.innerHTML = `<span class="font-bold">🤠 ${p.name}</span><span class="text-[10px] opacity-50 font-mono">${id.slice(0, 4)}</span>`;
+
+                const statusColor = isMe ? 'emerald' : (lastUpdatedAgo < 2 ? 'emerald' : 'yellow');
+
+                div.innerHTML = `
+                    <div class="flex flex-col">
+                        <span class="font-bold">🤠 ${p.name || 'Anonymous'}</span>
+                        <span class="text-[8px] opacity-30 font-mono tracking-widest">${id.slice(-6).toUpperCase()}</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <div class="w-1.5 h-1.5 rounded-full bg-${statusColor}-500 animate-pulse"></div>
+                    </div>
+                `;
                 list.appendChild(div);
             }
-            // Update Lobby Title with player count
-            const lobbyTitle = document.querySelector('#lobby-screen h3');
-            if (lobbyTitle) lobbyTitle.innerText = `Peers in Room (${count})`;
+
+            const badge = document.getElementById('player-count');
+            if (badge) badge.innerText = count;
         }
 
         window.copyRoomCode = () => {
