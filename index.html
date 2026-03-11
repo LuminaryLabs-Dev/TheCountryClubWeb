@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>The Country Club: Party Games</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.tailwindcss.com/3.4.1"></script>
     <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
     <style>
         body {
@@ -391,14 +391,16 @@
                     isHost = false;
                     peer.destroy();
                     peer = new Peer(null, { debug: 1 });
-                    peer.on('open', (id) => {
-                        myId = id;
-                        player.id = id;
+                    peer.on('open', (newId) => {
+                        myId = newId;
+                        player.id = newId;
                         document.getElementById('connection-status').innerText = "CONNECTING...";
                         // Wait a moment for signaling server
                         setTimeout(() => {
-                            const conn = peer.connect(hostId, { reliable: true });
-                            setupClientConnection(conn);
+                            if (peer && !peer.destroyed) {
+                                const conn = peer.connect(hostId, { reliable: true });
+                                setupClientConnection(conn);
+                            }
                         }, 800);
                     });
                 } else {
