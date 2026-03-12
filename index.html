@@ -36,9 +36,10 @@
             background-image: url('assets/background.png');
             background-size: cover;
             background-position: center;
-            background-attachment: fixed;
             z-index: -1;
             filter: saturate(1.2);
+            /* Prevent image from scaling poorly when UI zooms */
+            transform: translateZ(0);
         }
 
         canvas {
@@ -233,6 +234,35 @@
                 opacity: 1;
             }
         }
+
+        .network-pulse {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #22c55e;
+            box-shadow: 0 0 10px #22c55e;
+            animation: pulse-glow 2s infinite;
+        }
+
+        @keyframes pulse-glow {
+            0% {
+                transform: scale(0.95);
+                opacity: 0.5;
+                box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7);
+            }
+
+            70% {
+                transform: scale(1);
+                opacity: 1;
+                box-shadow: 0 0 0 10px rgba(34, 197, 94, 0);
+            }
+
+            100% {
+                transform: scale(0.95);
+                opacity: 0.5;
+                box-shadow: 0 0 0 0 rgba(34, 197, 94, 0);
+            }
+        }
     </style>
 </head>
 
@@ -264,11 +294,19 @@
     <div id="toast-container"></div>
 
     <!-- LOBBY UI -->
-    <div id="lobby-screen" class="fixed inset-0 z-[60] flex flex-col hidden p-4 pt-16 pb-8 md:p-12 overflow-y-auto">
+    <div id="lobby-screen" class="fixed inset-0 z-[60] flex flex-col hidden p-4 pt-8 md:pt-12 pb-8 overflow-y-auto">
         <div class="wood-board flex flex-col max-w-4xl mx-auto w-full min-h-[80vh] overflow-hidden shadow-2xl">
             <!-- Top Bar: Member Cards -->
             <div class="p-6 pb-2">
-                <h2 class="tropical-title text-2xl mb-4">The Party</h2>
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="tropical-title text-2xl">The Party</h2>
+                    <div
+                        class="flex items-center gap-2 bg-[#3e2723]/10 px-4 py-2 rounded-full border border-[#3e2723]/10">
+                        <div id="conn-pulse" class="hidden network-pulse"></div>
+                        <span id="connection-status"
+                            class="text-[10px] font-black uppercase tracking-widest opacity-60">OFFLINE</span>
+                    </div>
+                </div>
                 <div id="peer-list" class="flex gap-4 overflow-x-auto no-scrollbar pb-4">
                     <!-- Member cards injected here -->
                 </div>
@@ -730,7 +768,10 @@
                     isHost = true;
                     myId = id;
                     player.id = id;
-                    document.getElementById('connection-status').innerText = "HOSTING: " + roomCode;
+                    const statusEl = document.getElementById('connection-status');
+                    const pulseEl = document.getElementById('conn-pulse');
+                    if (statusEl) statusEl.innerText = "HOSTING: " + roomCode;
+                    if (pulseEl) pulseEl.classList.remove('hidden');
                     showToast("Hosting Room: " + roomCode);
 
                     peer.on('connection', (conn) => {
@@ -758,7 +799,8 @@
                         peer.on('open', (newId) => {
                             myId = newId;
                             player.id = newId;
-                            document.getElementById('connection-status').innerText = "CONNECTING...";
+                            const statusEl = document.getElementById('connection-status');
+                            if (statusEl) statusEl.innerText = "CONNECTING...";
                             // Wait a moment for signaling server
                             setTimeout(() => {
                                 if (peer && !peer.destroyed) {
@@ -770,7 +812,10 @@
                     } else {
                         console.error("PeerJS Error:", err);
                         showToast("Network Error: " + err.type);
-                        document.getElementById('connection-status').innerText = "OFFLINE (" + err.type + ")";
+                        const statusEl = document.getElementById('connection-status');
+                        const pulseEl = document.getElementById('conn-pulse');
+                        if (statusEl) statusEl.innerText = "OFFLINE (" + err.type + ")";
+                        if (pulseEl) pulseEl.classList.add('hidden');
                     }
                 });
             }
@@ -778,7 +823,10 @@
             function setupClientConnection(conn) {
                 conn.on('open', () => {
                     connections = [conn];
-                    document.getElementById('connection-status').innerText = "CLIENT: " + roomCode;
+                    const statusEl = document.getElementById('connection-status');
+                    const pulseEl = document.getElementById('conn-pulse');
+                    if (statusEl) statusEl.innerText = "CLIENT: " + roomCode;
+                    if (pulseEl) pulseEl.classList.remove('hidden');
                     showToast("Connected to Host!");
                     conn.on('data', (data) => handleDataFromHost(data));
 
