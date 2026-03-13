@@ -57,6 +57,13 @@
             position: relative;
         }
 
+        #lobby-screen.hidden {
+            display: none !important;
+            visibility: hidden;
+            opacity: 0;
+            pointer-events: none;
+        }
+
         .wood-board {
             background-color: #a1887f;
             background-image: linear-gradient(rgba(255, 255, 255, 0.1) 1px, transparent 1px),
@@ -883,13 +890,30 @@
 
             function handleDataFromHost(data) {
                 if (data.type === 'state_update') {
+                    const previousGame = metadata.currentGame;
                     world = data.world;
                     metadata = data.metadata;
-                    // Update other players, but don't overwrite yourself
+
+                    // Update other players
                     for (let id in data.players) {
                         if (id !== player.id) players[id] = data.players[id];
                     }
-                    handleGameStateChange();
+
+                    // CRITICAL: If game changed or status changed, trigger full UI update
+                    if (previousGame !== metadata.currentGame || !player.active) {
+                        handleGameStateChange();
+
+                        // Update HUD if entering a game
+                        if (metadata.currentGame !== 'lobby') {
+                            updateHudLabels(metadata.currentGame);
+                        }
+                    }
+
+                    // Update victory screen if ended
+                    if (metadata.status === 'ended') {
+                        updateVictoryScreen();
+                    }
+
                     updatePeerList();
                 }
             }
@@ -1029,70 +1053,135 @@
                 const lobby = document.getElementById('lobby-screen');
                 const hud = document.getElementById('game-hud');
                 const victory = document.getElementById('victory-screen');
+                const toolbar = document.getElementById('toolbar');
 
                 if (metadata.currentGame === 'lobby') {
                     // Show Lobby, Hide Game UI
                     lobby.classList.remove('hidden');
                     hud.classList.add('hidden');
                     victory.classList.add('hidden');
-                    player.active = false; // Disable movement
+                    if (toolbar) toolbar.classList.add('hidden');
+                    player.active = false;
+
+                    // Refresh peer list when returning to lobby
+                    updatePeerList();
                 } else {
-                    // HIDE LOBBY - This is the fix for the hanging backdrop
+                    // HIDE LOBBY - Force hide with display none style backup
                     lobby.classList.add('hidden');
+
+                    // Show HUD
                     hud.classList.remove('hidden');
+
+                    // Update HUD labels for current game
+                    updateHudLabels(metadata.currentGame);
+
+                    // Show toolbar only for farming
+                    if (toolbar) {
+                        toolbar.classList.toggle('hidden', metadata.currentGame !== 'farming');
+                    }
 
                     if (metadata.status === 'ended') {
                         victory.classList.remove('hidden');
+                        updateVictoryScreen();
                     } else {
                         victory.classList.add('hidden');
+                        // Only setup player if not already active (prevents reset on re-sync)
                         if (!player.active) {
                             setupPlayerForGame(metadata.currentGame);
-                            player.active = true; // Enable movement
+                            player.active = true;
                         }
                     }
                 }
             }
 
+            function updateVictoryScreen() {
+                const victoryPlayer = document.getElementById('victory-player');
+                const roundsInfo = document.getElementById('rounds-victory-info');
+                const roundStatus = document.getElementById('round-status-display');
+                const btnText = document.getElementById('victory-btn-text');
+
+                if (victoryPlayer) victoryPlayer.innerText = metadata.winner || 'Unknown';
+
+                if (metadata.lobbyMode === 'rounds' && metadata.roundsSettings.current < metadata.roundsSettings.total) {
+                    if (roundsInfo) roundsInfo.classList.remove('hidden');
+                    if (roundStatus) roundStatus.innerText = `Round ${metadata.roundsSettings.current} of ${metadata.roundsSettings.total}`;
+                    if (btnText) btnText.innerText = 'NEXT ROUND';
+                } else {
+                    if (roundsInfo) roundsInfo.classList.add('hidden');
+                    if (btnText) btnText.innerText = 'RETURN TO HUB';
+                }
+
+                // Update scores display
+                updatePeerList();
+            }
+
             function setupPlayerForGame(game) {
                 player.score = 0;
                 player.eliminated = false;
-                if (game === 'farming') { player.x = 10; player.y = 10; player.money = 10; player.inv = 0; }
-                else if (game === 'reapers') { player.x = Math.floor(GRID_SIZE / 2); player.y = Math.floor(GRID_SIZE / 2); }
-                else if (game === 'pond') { player.x = 25; player.y = 2; }
-                else if (game === 'mushrooms') { player.x = 25; player.y = 25; }
-                else if (game === 'swimmer') { player.x = Math.floor(GRID_SIZE / 2); player.y = 1; }
+                player.tool = 'hoe'; // Default tool
+
+                // Reset position based on game
+                switch (game) {
+                    case 'farming':
+                        player.x = 10; player.y = 10;
+                        player.money = 10;
+                        player.inv = 0;
+                        break;
+                    case 'reapers':
+                        player.x = Math.floor(GRID_SIZE / 2);
+                        player.y = Math.floor(GRID_SIZE / 2);
+                        break;
+                    case 'pond':
+                        player.x = 25; player.y = 2;
+                        break;
+                    case 'mushrooms':
+                        player.x = 25; player.y = 25;
+                        break;
+                    case 'swimmer':
+                        player.x = Math.floor(GRID_SIZE / 2);
+                        player.y = 1;
+                        break;
+                }
+
+                // Sync immediately
                 syncSelf();
             }
 
             window.hostGame = (game) => {
                 if (!isHost) {
-                    // Clients request host to switch games
                     if (!sendToHost({ type: 'action_game', action: 'host', game: game })) {
                         showToast("Connection to Host lost. Try reconnecting.");
                     }
                     return;
                 }
-                metadata = { currentGame: game, status: 'playing', startTime: Date.now(), winner: null };
+
+                // Reset game state properly
+                metadata = {
+                    currentGame: game,
+                    status: 'playing',
+                    startTime: Date.now(),
+                    winner: null,
+                    lobbyMode: metadata.lobbyMode, // Preserve lobby mode
+                    roundsSettings: metadata.roundsSettings // Preserve rounds settings
+                };
+
+                // Generate the world first
                 seedMap(game);
-                handleGameStateChange(); // Host UI update
-                broadcastState();
-            };
 
-            window.endGame = (winnerName) => {
-                if (!isHost || metadata.status === 'ended') return;
-                metadata.status = 'ended';
-                metadata.winner = winnerName;
+                // CRITICAL: Setup player immediately for host
+                setupPlayerForGame(game);
+                player.active = true;
 
-                // Track score if in rounds mode
-                if (metadata.lobbyMode === 'rounds' && winnerName) {
-                    if (metadata.roundsSettings.scores[winnerName] !== undefined) {
-                        metadata.roundsSettings.scores[winnerName]++;
-                    } else {
-                        metadata.roundsSettings.scores[winnerName] = 1;
-                    }
+                // Update UI for host immediately
+                handleGameStateChange();
+                updateHudLabels(game); // Configure HUD for this game mode
+
+                // Show/hide toolbar based on game
+                const toolbar = document.getElementById('toolbar');
+                if (toolbar) {
+                    toolbar.classList.toggle('hidden', game !== 'farming');
                 }
 
-                handleGameStateChange(); // Host sees victory too
                 broadcastState();
             };
 
