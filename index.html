@@ -43,12 +43,20 @@
         }
 
         canvas {
+            position: fixed;
+            inset: 0;
+            z-index: 10;
             display: block;
             image-rendering: auto;
             touch-action: none;
         }
 
-        .ui-panel {
+        .ui-panel,
+        #lobby-screen,
+        #victory-screen,
+        #game-hud {
+            z-index: 20;
+            position: relative;
             pointer-events: auto;
         }
 
@@ -1023,58 +1031,28 @@
             function handleGameStateChange() {
                 const lobby = document.getElementById('lobby-screen');
                 const hud = document.getElementById('game-hud');
-                const toolbar = document.getElementById('toolbar');
                 const victory = document.getElementById('victory-screen');
-                const vCard = document.getElementById('victory-card');
 
                 if (metadata.currentGame === 'lobby') {
+                    // Show Lobby, Hide Game UI
                     lobby.classList.remove('hidden');
                     hud.classList.add('hidden');
-                    toolbar.classList.add('hidden');
                     victory.classList.add('hidden');
-                    player.active = false;
-                }
-                else {
+                    player.active = false; // Disable movement
+                } else {
+                    // HIDE LOBBY - This is the fix for the hanging backdrop
                     lobby.classList.add('hidden');
                     hud.classList.remove('hidden');
 
-                    if (metadata.currentGame === 'farming') toolbar.classList.remove('hidden');
-                    else toolbar.classList.add('hidden');
-
-                    if (metadata.status === 'playing') {
-                        victory.classList.add('hidden');
-                        vCard.classList.remove('scale-100');
-                        if (!player.active) setupPlayerForGame(metadata.currentGame);
-                        player.active = true;
-                    }
-                    else if (metadata.status === 'ended') {
-                        player.active = false; // Freeze movement
-                        document.getElementById('victory-player').innerText = metadata.winner || "NO ONE";
-
-                        const isRounds = metadata.lobbyMode === 'rounds';
-                        document.getElementById('rounds-victory-info').classList.toggle('hidden', !isRounds);
-
-                        if (isRounds) {
-                            const isFinal = metadata.roundsSettings.current >= metadata.roundsSettings.total;
-                            document.getElementById('round-status-display').innerText = isFinal ?
-                                "TOURNAMENT FINISHED" :
-                                `ROUND ${metadata.roundsSettings.current} OF ${metadata.roundsSettings.total}`;
-
-                            document.getElementById('victory-btn-text').innerText = isFinal ?
-                                "SHOW FINAL STANDINGS" :
-                                "READY FOR NEXT ROUND";
-                        } else {
-                            document.getElementById('victory-btn-text').innerText = "RETURN TO HUB";
-                        }
-
+                    if (metadata.status === 'ended') {
                         victory.classList.remove('hidden');
-                        setTimeout(() => {
-                            vCard.classList.add('scale-100');
-                            lucide.createIcons();
-                        }, 50);
+                    } else {
+                        victory.classList.add('hidden');
+                        if (!player.active) {
+                            setupPlayerForGame(metadata.currentGame);
+                            player.active = true; // Enable movement
+                        }
                     }
-
-                    updateHudLabels(metadata.currentGame);
                 }
             }
 
