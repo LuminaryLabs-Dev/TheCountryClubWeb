@@ -34,10 +34,19 @@
             position: fixed;
             inset: 0;
             background-image: url('assets/background.png');
+            background-size: cover;
+            /* Prevents tiling/seams */
+            background-position: center;
+            /* Centers the image */
+            background-repeat: no-repeat;
+            /* Prevents horizontal repeat */
+            background-color: #87ceeb;
+            /* Fallback color */
             z-index: -1;
             filter: saturate(1.2);
-            /* Prevent image from scaling poorly when UI zooms */
             transform: translateZ(0);
+            will-change: transform;
+            /* Performance optimization */
         }
 
         canvas {
@@ -856,19 +865,32 @@
             }
 
             // --- Data Handling ---
+            let lastBroadcast = 0;
             function broadcastState() {
                 if (!isHost) return;
+
+                // Throttle to max 5 times per second (200ms)
+                const now = Date.now();
+                if (now - lastBroadcast < 200) return;
+                lastBroadcast = now;
+
                 const fullState = {
                     type: 'state_update',
                     world: world,
                     metadata: metadata,
                     players: { [player.id]: player, ...players }
                 };
+
                 connections.forEach(conn => {
-                    if (conn.open) conn.send(fullState);
+                    if (conn.open) {
+                        try {
+                            conn.send(fullState);
+                        } catch (e) {
+                            console.warn("Broadcast failed to", conn.peer);
+                        }
+                    }
                 });
             }
-
             function handleDataFromClient(conn, data) {
                 if (data.type === 'player_update') {
                     players[data.player.id] = data.player;
@@ -921,6 +943,9 @@
             // --- World Generation ---
             async function seedMap(type) {
                 if (!isHost) return;
+                showToast("Generating world...");
+                await new Promise(resolve => setTimeout(resolve, 10));
+
                 const tiles = {};
 
                 if (type === 'farming') {
@@ -1055,7 +1080,7 @@
                 const victory = document.getElementById('victory-screen');
                 const toolbar = document.getElementById('toolbar');
 
-                if (metadata.currentGame === 'lobby') {
+                if (metadata.currentGame !== 'lobby') {
                     // Show Lobby, Hide Game UI
                     lobby.classList.remove('hidden');
                     hud.classList.add('hidden');
@@ -1090,6 +1115,23 @@
                             setupPlayerForGame(metadata.currentGame);
                             player.active = true;
                         }
+                    }
+                }
+
+                if (metadata.currentGame !== 'lobby') {
+                    // Force game loop to ensure it's running
+                    if (!isLooping) {
+                        isLooping = true;
+                        requestAnimationFrame(gameLoop);
+                    }
+
+                    // Update HUD
+                    updateHudLabels(metadata.currentGame);
+
+                    // Show/hide toolbar
+                    const toolbar = document.getElementById('toolbar');
+                    if (toolbar) {
+                        toolbar.classList.toggle('hidden', metadata.currentGame !== 'farming');
                     }
                 }
             }
@@ -1555,7 +1597,12 @@
 
                     if (t.type === 'tilled') {
                         ctx.fillStyle = t.watered ? '#422006' : '#713f12';
-                        ctx.beginPath(); ctx.roundRect(px + 4, py + 4, TILE_SIZE - 8, TILE_SIZE - 8, 8); ctx.fill();
+                        // Use arc for compatibility instead of roundRect
+                        ctx.beginPath();
+                        ctx.arc(px + TILE_SIZE / 2, py + TILE_SIZE / 2, TILE_SIZE / 2 - 4, 0, Math.PI * 2);
+                        ctx.fill();
+                        // Or use standard rect if you prefer square tiles:
+                        // ctx.fillRect(px + 4, py + 4, TILE_SIZE - 8, TILE_SIZE - 8);
                     }
                     if (t.type === 'water' || t.type === 'deep_water') {
                         ctx.fillStyle = t.type === 'water' ? '#0ea5e9' : '#0284c7';
@@ -1727,8 +1774,11 @@
                 }
 
                 ctx.restore();
-                requestAnimationFrame(gameLoop);
+            } catch (e) {
+                console.error("Game loop error:", e);
+                showToast("Render error: " + e.message);
             }
+            requestAnimationFrame(gameLoop);
 
             function resize() {
                 if (canvas.width !== window.innerWidth || canvas.height !== window.innerHeight) {
